@@ -29,13 +29,19 @@ func main() {
 	}
 	pcapFile := os.Args[1]
 	// Open output file
-	f, _ := os.Create("output.pcapng")
-	w, err := pcapgo.NewNgWriter(f, layers.LinkTypeEthernet)
+	f, err := os.Create("output.pcapng")
 	if err != nil {
 		panic(err)
 	}
-	//	w.WriteFileHeader(1024, layers.LinkTypeEthernet)
+
 	defer f.Close()
+	w, err := pcapgo.NewNgWriter(f, layers.LinkTypeEthernet)
+
+	if err != nil {
+		panic(err)
+	}
+	defer w.Flush()
+	//	w.WriteFileHeader(1024, layers.LinkTypeEthernet)
 	// Open file instead of device
 	handle, err = pcap.OpenOffline(pcapFile)
 	if err != nil {
