@@ -22,7 +22,27 @@ var (
 	err    error
 )
 
+type surpress struct {
+	DNS    bool
+	output bool
+}
+
+func printhd(out bool, p []byte, title string) {
+
+	if out == true {
+		fmt.Println(title)
+		fmt.Println(hex.Dump(p))
+	}
+}
+
 func main() {
+
+	// get flags first
+
+	s := surpress{
+		DNS:    true,
+		output: false,
+	}
 	if len(os.Args) < 2 {
 		fmt.Printf("Usage: %s <file>\n", os.Args[0])
 		os.Exit(-1)
@@ -57,9 +77,10 @@ func main() {
 		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 			fmt.Println("This is a TCP packet!")
 
-			packetFrameb := packet.Data()
-			fmt.Println("before")
-			fmt.Println(hex.Dump(packetFrameb))
+			printhd(s.output, packet.Data(), "before")
+			//		packetFrameb := packet.Data()
+			//		fmt.Println("before")
+			//		fmt.Println(hex.Dump(packetFrameb))
 
 			// New Payload
 			tcpPayload := tcpLayer.LayerPayload()
@@ -73,21 +94,32 @@ func main() {
 			tcp := tcpLayer.(*layers.TCP)
 			copy(tcp.BaseLayer.Payload, tcpNewPayload)
 
-			packetFrame := packet.Data()
+			//			packetFrame := packet.Data()
 			//	newPacket := gopacket.NewPacket(packetFrame, layers.LayerTypeEthernet, gopacket.Default)
 
-			fmt.Println("after")
-			fmt.Println(hex.Dump(packetFrame))
+			//			fmt.Println("after")
+			//			fmt.Println(hex.Dump(packetFrame))
 
+			printhd(s.output, packet.Data(), "after")
 			// Write Packet
 			w.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
 		} else if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 			//UDP
 			fmt.Println("This is a UDP packet!")
+			udp := udpLayer.(*layers.UDP)
+			if s.DNS == true && (udp.DstPort == 53 ||
+				udp.SrcPort == 53) {
+				fmt.Println("Skipping DNS packet")
+				w.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+				continue
+			}
 
-			packetFrameb := packet.Data()
-			fmt.Println("before")
-			fmt.Println(hex.Dump(packetFrameb))
+			printhd(s.output, packet.Data(), "before")
+			//if s.output == true {
+			//	packetFrameb := packet.Data()
+			//	fmt.Println("before")
+			//	fmt.Println(hex.Dump(packetFrameb))
+			//}
 
 			// New Payload
 			udpPayload := udpLayer.LayerPayload()
@@ -98,13 +130,13 @@ func main() {
 				udpNewPayload[i] = paystring[i%j]
 			}
 
-			udp := udpLayer.(*layers.UDP)
 			copy(udp.BaseLayer.Payload, udpNewPayload)
 
-			packetFrame := packet.Data()
+			//		packetFrame := packet.Data()
 
-			fmt.Println("after")
-			fmt.Println(hex.Dump(packetFrame))
+			//		fmt.Println("after")
+			//		fmt.Println(hex.Dump(packetFrame))
+			printhd(s.output, packet.Data(), "after")
 
 			// Write Packet
 			w.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
