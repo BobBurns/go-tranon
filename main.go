@@ -13,18 +13,20 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/pcapgo"
-	"log"
+	//	"log"
 	"os"
 )
 
 var (
-	handle *pcap.Handle
-	err    error
+	handle    *pcap.Handle
+	err       error
+	paystring = []byte("payload replaced by go-tranon!")
 )
 
 type surpress struct {
 	DNS    bool
 	output bool
+	Telnet bool
 }
 
 func printhd(out bool, p []byte, title string) {
@@ -35,19 +37,39 @@ func printhd(out bool, p []byte, title string) {
 	}
 }
 
+func buildPayload(newPayload []byte) {
+	j := len(paystring)
+	for i := 0; i < len(newPayload); i++ {
+		newPayload[i] = paystring[i%j]
+	}
+
+}
+
 func main() {
 
 	// get flags first
 
 	s := surpress{
 		DNS:    true,
-		output: false,
+		output: true,
+		Telnet: true,
 	}
 	if len(os.Args) < 2 {
 		fmt.Printf("Usage: %s <file>\n", os.Args[0])
 		os.Exit(-1)
 	}
 	pcapFile := os.Args[1]
+	// Open input file
+	pf, err := os.Open(pcapFile)
+	if err != nil {
+		panic(err)
+	}
+	defer pf.Close()
+
+	r, err := pcapgo.NewNgReader(pf, pcapgo.DefaultNgReaderOptions)
+	if err != nil {
+		panic(err)
+	}
 	// Open output file
 	f, err := os.Create("output.pcapng")
 	if err != nil {
@@ -55,7 +77,8 @@ func main() {
 	}
 
 	defer f.Close()
-	w, err := pcapgo.NewNgWriter(f, layers.LinkTypeEthernet)
+	fmt.Println("writer link type", r.LinkType())
+	w, err := pcapgo.NewNgWriter(f, r.LinkType())
 
 	if err != nil {
 		panic(err)
@@ -63,24 +86,44 @@ func main() {
 	defer w.Flush()
 	//	w.WriteFileHeader(1024, layers.LinkTypeEthernet)
 	// Open file instead of device
-	handle, err = pcap.OpenOffline(pcapFile)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer handle.Close()
 
-	paystring := []byte("payload replaced by go-tranon!")
 	// Loop through packets in file
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	//	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	packetSource := gopacket.NewPacketSource(r, r.LinkType())
+	fmt.Println("packet source link type", r.LinkType())
 	for packet := range packetSource.Packets() {
 		// TCP
 		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 			fmt.Println("This is a TCP packet!")
+			tcp := tcpLayer.(*layers.TCP)
+
+			// Telnet
+
+			if s.Telnet == true && (tcp.DstPort == 23 ||
+				tcp.SrcPort == 23) {
+				if app := packet.ApplicationLayer(); app != nil {
+
+					telpay := app.Payload()
+					if telpay[0] >= 240 {
+						fmt.Println("telnet command data. skipping...")
+						w.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+						continue
+					}
+
+					printhd(true, telpay, "telnet dump")
+					appNewPayload := make([]byte, len(telpay))
+
+					buildPayload(appNewPayload)
+					copy(*packet.ApplicationLayer().(*gopacket.Payload), appNewPayload)
+
+					printhd(true, packet.Data(), "telnet dump 2")
+					w.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+					continue
+				}
+
+			}
 
 			printhd(s.output, packet.Data(), "before")
-			//		packetFrameb := packet.Data()
-			//		fmt.Println("before")
-			//		fmt.Println(hex.Dump(packetFrameb))
 
 			// New Payload
 			tcpPayload := tcpLayer.LayerPayload()
@@ -91,14 +134,7 @@ func main() {
 				tcpNewPayload[i] = paystring[i%j]
 			}
 
-			tcp := tcpLayer.(*layers.TCP)
 			copy(tcp.BaseLayer.Payload, tcpNewPayload)
-
-			//			packetFrame := packet.Data()
-			//	newPacket := gopacket.NewPacket(packetFrame, layers.LayerTypeEthernet, gopacket.Default)
-
-			//			fmt.Println("after")
-			//			fmt.Println(hex.Dump(packetFrame))
 
 			printhd(s.output, packet.Data(), "after")
 			// Write Packet
