@@ -7,13 +7,15 @@ package main
 */
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/pcapgo"
-	//	"log"
+	"io"
+	"log"
 	"os"
 )
 
@@ -60,16 +62,34 @@ func main() {
 	}
 	pcapFile := os.Args[1]
 	// Open input file
+
+	// check file type
 	pf, err := os.Open(pcapFile)
 	if err != nil {
 		panic(err)
 	}
-	defer pf.Close()
-
-	r, err := pcapgo.NewNgReader(pf, pcapgo.DefaultNgReaderOptions)
-	if err != nil {
-		panic(err)
+	fbytes := make([]byte, 16)
+	n, err := io.ReadAtLeast(pf, fbytes, 16)
+	if err != nil || n < 16 {
+		log.Fatal("bad file", err)
 	}
+
+	fmt.Println(hex.Dump(fbytes))
+	magic1 := []byte{0x1a, 0x2b, 0x3c, 0x4d}
+	magic2 := []byte{0x4d, 0x3c, 0x2b, 0x1a}
+	// need to close this now to open again
+	pf.Close()
+
+	pflag := false
+	if bytes.Equal(fbytes[8:12], magic1) || bytes.Equal(fbytes[8:12], magic2) {
+		fmt.Println("pcapng")
+		pflag = true
+	} else {
+		fmt.Println("most likely pcap")
+	}
+
+	//os.Exit(0)
+
 	// Open output file
 	f, err := os.Create("output.pcapng")
 	if err != nil {
@@ -77,20 +97,46 @@ func main() {
 	}
 
 	defer f.Close()
-	fmt.Println("writer link type", r.LinkType())
-	w, err := pcapgo.NewNgWriter(f, r.LinkType())
-
-	if err != nil {
-		panic(err)
-	}
-	defer w.Flush()
 	//	w.WriteFileHeader(1024, layers.LinkTypeEthernet)
 	// Open file instead of device
 
 	// Loop through packets in file
 	//	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	packetSource := gopacket.NewPacketSource(r, r.LinkType())
-	fmt.Println("packet source link type", r.LinkType())
+	var lt layers.LinkType
+	packetSource := &gopacket.PacketSource{}
+	if pflag {
+		pf, err := os.Open(pcapFile)
+		if err != nil {
+			panic(err)
+		}
+		defer pf.Close()
+		r, err := pcapgo.NewNgReader(pf, pcapgo.DefaultNgReaderOptions)
+		if err != nil {
+			panic(err)
+		}
+
+		lt = r.LinkType()
+
+		packetSource = gopacket.NewPacketSource(r, lt)
+	} else {
+
+		handle, err = pcap.OpenOffline(pcapFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer handle.Close()
+
+		lt = handle.LinkType()
+		packetSource = gopacket.NewPacketSource(handle, lt)
+	}
+	fmt.Println("packet source link type", lt)
+	fmt.Println("writer link type", lt)
+	w, err := pcapgo.NewNgWriter(f, lt)
+
+	if err != nil {
+		panic(err)
+	}
+	defer w.Flush()
 	for packet := range packetSource.Packets() {
 		// TCP
 		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
