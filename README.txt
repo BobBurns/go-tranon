@@ -3,17 +3,30 @@ $ go build
 $ ./go-tranon <file>
 $ cp output.pcapng ~/Tracefiles
 
-** wants **
-anonymize IP src/dst addresses
-sanitize applicaiton layer protocols
+****************************************** wants *****************************************
+
+anonymize IP src/dst addresses -- working on it
+
+sanitize applicaiton layer protocols -- working on it
+
+gocui ncurses interface
+
+Protocols to work on: IPv6, Ethernet, Arp, ...
 
 
-** updates **
-9-01-20 sanitize TELNET, surpress DNS, decode Raw and Ethernet (this was hanging me up capturing on tunnel interface)
+***************************************** updates *****************************************
+
+9-01-20 sanitize TELNET, surpress DNS, decode Raw and Ethernet (this was hanging me up 
+capturing on tunnel interface)
 
 9-03-20 check magic for file type pcap or pcapng and open accordingly
 
-** Example Output **
+9-06-20 Support for IP layer working. Was trying to avoid it, but finally had to use gopacket.SerializePacket()
+
+
+************************************** Example Output **************************************
+
+pcapng tracefile captured with wireshark on utun0 interface (no ethernet header)
 
 with parameters set in main
 
