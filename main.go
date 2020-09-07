@@ -11,6 +11,7 @@ package main
 import (
 	"bytes"
 	"encoding/hex"
+	"flag"
 	"fmt"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -18,14 +19,16 @@ import (
 	"github.com/google/gopacket/pcapgo"
 	"io"
 	"log"
-	//	"net"
+	"net"
 	"os"
+	"strings"
 )
 
 var (
-	handle    *pcap.Handle
-	err       error
-	paystring = []byte("payload replaced by go-tranon!")
+	handle             *pcap.Handle
+	err                error
+	paystring          = []byte("payload replaced by go-tranon!")
+	supportedProtocols = []string{"TCP", "UDP", "Telnet"}
 )
 
 type surpress struct {
@@ -33,13 +36,17 @@ type surpress struct {
 	output bool
 }
 type modify struct {
-	Ethernet bool
-	IP       bool
-	TCP      bool
-	UDP      bool
-	Telnet   bool
-	NewSrcIP []byte
-	OldSrcIP []byte
+	Anon       bool
+	AnonEth    bool
+	Sani       bool
+	IP         bool
+	TCP        bool
+	UDP        bool
+	Telnet     bool
+	NewIpAddr  net.IP
+	OldIpAddr  net.IP
+	NewMacAddr net.HardwareAddr
+	OldMacAddr net.HardwareAddr
 }
 type iflags struct {
 	ipv4 bool
@@ -50,7 +57,7 @@ type iflags struct {
 
 func printhd(out bool, p []byte, title string) {
 
-	if out == true {
+	if out == false {
 		fmt.Println(title)
 		fmt.Println(hex.Dump(p))
 	}
@@ -64,26 +71,102 @@ func buildPayload(newPayload []byte) {
 
 }
 
+func checkErr(err error) {
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
 func main() {
 
 	// get flags first
+	anonf := flag.Bool("A", false, "Anonymize IP address. Requires -o old and -n new address")
+	anonhf := flag.Bool("AH", false, "Anonymize Hardware (MAC) address. Requires -ohaddr old and -nhaddr new address")
+	sanf := flag.Bool("S", false, "Sanitize payload. Requires at least one -p protocol")
+	protof := flag.String("p", "", "Comma separated list of protocols to sanitize")
+	printPf := flag.Bool("P", false, "Print supported protocols")
+	oaddrf := flag.String("oaddr", "", "old quoted IPv4 or IPv6 address to anonymize")
+	naddrf := flag.String("naddr", "", "new quoted IPv4 or IPv6 address to anonymize")
+	ohaddrf := flag.String("ohaddr", "", "old quoted MAC address to anonymize")
+	nhaddrf := flag.String("nhaddr", "", "new quoted MAC address to anonymize")
+	//	surpf := flag.String("s", "", "Comma separated list of protocols to surpress being sanitized")
+	quietf := flag.Bool("q", false, "quiet output")
+
+	flag.Parse()
+
+	if *printPf {
+		fmt.Println("Currently Supported protocols for sanitizing:")
+		for _, prot := range supportedProtocols {
+			fmt.Println(prot)
+		}
+		os.Exit(0)
+	}
 
 	s := surpress{
-		DNS:    true,
-		output: true,
+		output: *quietf,
 	}
 	m := modify{
-
-		Telnet:   true,
-		IP:       true,
-		NewSrcIP: []byte{10, 0, 0, 1},
-		OldSrcIP: []byte{10, 9, 4, 80},
+		Anon:    *anonf,
+		AnonEth: *anonhf,
+		Sani:    *sanf,
 	}
-	if len(os.Args) < 2 {
-		fmt.Printf("Usage: %s <file>\n", os.Args[0])
+
+	// get Annon Addresses
+	if m.Anon {
+		if net.ParseIP(*naddrf) != nil {
+			m.NewIpAddr = net.ParseIP(*naddrf)
+		}
+		if net.ParseIP(*oaddrf) != nil {
+
+			m.OldIpAddr = net.ParseIP(*oaddrf)
+		}
+	}
+	if m.NewIpAddr.String() == "" || m.OldIpAddr.String() == "" {
+		fmt.Println("WARNING. New and/or old Ip address empty")
+		fmt.Println("New", m.NewIpAddr, "Old", m.OldIpAddr)
+	}
+	if m.AnonEth {
+		addr, err := net.ParseMAC(*nhaddrf)
+		checkErr(err)
+		m.NewMacAddr = addr
+		maddr, err := net.ParseMAC(*ohaddrf)
+		checkErr(err)
+		m.OldMacAddr = maddr
+	}
+
+	protos := strings.Split(*protof, ",")
+	/*
+		type modify struct {
+			Anon       bool
+			AnonEth    bool
+			Sani       bool
+			IP         bool
+
+			TCP        bool
+			UDP        bool
+			Telnet     bool
+	*/
+
+	for _, prot := range protos {
+		switch prot {
+		case "Telnet":
+			m.Telnet = true
+		case "IP":
+			m.IP = true
+		case "TCP":
+			m.TCP = true
+		case "UDP":
+			m.UDP = true
+		}
+	}
+
+	fargs := flag.Args()
+	if len(fargs) != 1 {
+		fmt.Printf("Usage: %s <options> <file>\n", os.Args[0])
+		fmt.Printf("Use ./%s --help for list of options", os.Args[0])
 		os.Exit(-1)
 	}
-	pcapFile := os.Args[1]
+	pcapFile := fargs[0]
 	// Open input file
 
 	// check file type
@@ -171,10 +254,25 @@ func main() {
 		newBuffer := gopacket.NewSerializeBuffer()
 		// Layer 2
 		EthLayer := packet.Layer(layers.LayerTypeEthernet)
-		if EthLayer == nil && m.Ethernet {
+		if EthLayer == nil && m.AnonEth {
 			fmt.Println("No Ethernet Layer to modify in packet %d\n", i)
-		} else {
+		} else if m.AnonEth {
 			// do something with ethernet layer
+			fmt.Println("Ethernet Layer")
+			eth := EthLayer.(*layers.Ethernet)
+			fmt.Println("MAC src", eth.SrcMAC)
+			fmt.Println("old MAC src", m.OldMacAddr)
+			// IP address is at the end of 16 byte slice
+			if bytes.Equal(eth.SrcMAC, m.OldMacAddr) {
+				fmt.Println("found MAC match")
+				eth.SrcMAC = m.NewMacAddr
+
+			}
+			if bytes.Equal(eth.DstMAC, m.OldMacAddr) {
+				fmt.Println("found MAC match")
+				eth.DstMAC = m.NewMacAddr
+
+			}
 		}
 		// Layer 3
 		ip4 := &layers.IPv4{}
@@ -183,19 +281,32 @@ func main() {
 		if IPLayer == nil && m.IP {
 			fmt.Println("No IP Layer to modify in packet %d\n", i)
 		} else {
+			// INFO need to handle IPv6 here
 			flags.ipv4 = true
 
 			fmt.Println("IP Layer")
 			ip4 = IPLayer.(*layers.IPv4)
-			fmt.Println("ip src", ip4.SrcIP[0:4], len(ip4.SrcIP))
-			fmt.Println("old ip src", m.OldSrcIP[0:4], len(m.OldSrcIP))
-			// IP address is at the end of 16 byte slice
-			if bytes.Equal(ip4.SrcIP[0:4], m.OldSrcIP[0:4]) {
-				fmt.Println("found IP match")
-				//copy([]byte(s.NewSrcIP[0:4]), []byte(ip.SrcIP[0:4]))
-				ip4.SrcIP = m.NewSrcIP
-				fmt.Println("ip src", ip4.SrcIP[0:4], len(ip4.SrcIP))
+			if m.Anon {
+				fmt.Println("ip src", ip4.SrcIP, len(ip4.SrcIP))
+				fmt.Println("old ip src", m.OldIpAddr, len(m.OldIpAddr))
+				// IP address is at the end of 16 byte slice
+				if bytes.Equal(ip4.SrcIP.To4(), m.OldIpAddr.To4()) {
+					fmt.Println("found IP match")
+					//copy([]byte(s.NewSrcIP[0:4]), []byte(ip.SrcIP[0:4]))
+					ip4.SrcIP = m.NewIpAddr
+					fmt.Println("ip src", ip4.SrcIP[0:4], len(ip4.SrcIP))
 
+				}
+				fmt.Println("ip dst", ip4.DstIP, len(ip4.DstIP))
+				fmt.Println("old ip src", m.OldIpAddr, len(m.OldIpAddr))
+				// IP address is at the end of 16 byte slice
+				if bytes.Equal(ip4.DstIP.To4(), m.OldIpAddr.To4()) {
+					fmt.Println("found IP match")
+					//copy([]byte(s.NewSrcIP[0:4]), []byte(ip.SrcIP[0:4]))
+					ip4.DstIP = m.NewIpAddr
+					fmt.Println("ip dst", ip4.DstIP[0:4], len(ip4.DstIP))
+
+				}
 			}
 		}
 
@@ -245,6 +356,7 @@ func main() {
 			//printhd(s.output, packet.Data(), "before")
 
 			// New Payload
+			/* DONT KNOW WHY
 			tcpPayload := tcpLayer.LayerPayload()
 			tcpNewPayload := make([]byte, len(tcpPayload))
 
@@ -254,6 +366,7 @@ func main() {
 			}
 
 			copy(tcp.BaseLayer.Payload, tcpNewPayload)
+			*/
 
 		} else if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 			//UDP
