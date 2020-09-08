@@ -28,7 +28,7 @@ var (
 	handle             *pcap.Handle
 	err                error
 	paystring          = []byte("payload replaced by go-tranon!")
-	supportedProtocols = []string{"TCP", "UDP", "Telnet"}
+	supportedProtocols = []string{"TCP", "UDP", "Telnet", "HTTP", "FTP", "SMB"}
 )
 
 type surpress struct {
@@ -43,6 +43,9 @@ type modify struct {
 	TCP        bool
 	UDP        bool
 	Telnet     bool
+	HTTP       bool
+	FTP        bool
+	SMB        bool
 	NewIpAddr  net.IP
 	OldIpAddr  net.IP
 	NewMacAddr net.HardwareAddr
@@ -151,6 +154,12 @@ func main() {
 		switch prot {
 		case "Telnet":
 			m.Telnet = true
+		case "HTTP":
+			m.HTTP = true
+		case "FTP":
+			m.FTP = true
+		case "SMB":
+			m.SMB = true
 		case "IP":
 			m.IP = true
 		case "TCP":
@@ -334,24 +343,28 @@ func main() {
 
 			// Telnet
 
-			if m.Telnet && (tcp.DstPort == 23 ||
-				tcp.SrcPort == 23) {
-				if app := packet.ApplicationLayer(); app != nil {
+			tcpAppLayerPayload(m, *tcp, packet)
 
-					telpay := app.Payload()
-					if telpay[0] >= 240 {
-						fmt.Println("telnet command data. skipping...")
-					} else {
+			/*
+				if m.Telnet && (tcp.DstPort == 23 ||
+					tcp.SrcPort == 23) {
+					if app := packet.ApplicationLayer(); app != nil {
 
-						appNewPayload := make([]byte, len(telpay))
+						telpay := app.Payload()
+						if telpay[0] >= 240 {
+							fmt.Println("telnet command data. skipping...")
+						} else {
 
-						buildPayload(appNewPayload)
-						copy(*packet.ApplicationLayer().(*gopacket.Payload), appNewPayload)
+							appNewPayload := make([]byte, len(telpay))
+
+							buildPayload(appNewPayload)
+							copy(*packet.ApplicationLayer().(*gopacket.Payload), appNewPayload)
+						}
+
 					}
 
 				}
-
-			}
+			*/
 
 			//printhd(s.output, packet.Data(), "before")
 
@@ -376,7 +389,7 @@ func main() {
 			if s.DNS == true && (udp.DstPort == 53 ||
 				udp.SrcPort == 53) {
 				fmt.Println("Skipping DNS packet")
-			} else {
+			} else if m.UDP {
 
 				// New UDP Payload
 				udpPayload := udpLayer.LayerPayload()

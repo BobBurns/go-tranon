@@ -14,6 +14,10 @@ gocui ncurses interface
 Protocols to work on: IPv6, Ethernet, Arp, ...
 
 
+***************************************** issues *****************************************
+
+Does not support files > 2M
+
 ***************************************** updates *****************************************
 
 9-01-20 sanitize TELNET, surpress DNS, decode Raw and Ethernet (this was hanging me up 
@@ -24,6 +28,9 @@ capturing on tunnel interface)
 9-06-20 Support for IP layer working. Was trying to avoid it, but finally had to use gopacket.SerializePacket()
 
 9-06-20 Added Command line arguments (flags). Got Ethernet MAC anonymizer working
+
+9-07-20 Adding Application Protocols HTTP, FTP, SMB
+	HTTP keep first 16 bytes, FTP keep first 4, SMB 32 or 36 if NetBIOS
 
 
 ************************************** Example Output **************************************
